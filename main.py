@@ -1,7 +1,8 @@
 from transformers import pipeline
+import json
 import torch
 
-import json
+
 with open("config/model.json", "r") as f:
     config = json.load(f)
 
