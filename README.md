@@ -1,20 +1,83 @@
-# GPT OSS Test Runner
+# GPT OSS Utilities
 
-## Overview
-This repository contains a minimal script (`main.py`) for smoke-testing open weight LLMs via the Hugging Face [`transformers`](https://huggingface.co/docs/transformers) pipeline. It is currently exercised on an Apple Mac with M4 SoC and runs fine within that environment. The script:
+This repository now houses two related utilities:
 
-- reads `config/model.json` to determine which chat model to load and what prompt to send
-- automatically selects the best available device (`mps`, GPU, or CPU) through `device_map="auto"`
-- prints the model's assistant reply to STDOUT so you can verify the model is responding
+1. **FastAPI chat backend** (`backend/`) that serves deterministic demo responses for a ChatGPT-style UI. Point your frontend (for example the `test_chatapp_codex` Next.js app) at this service instead of booting a backend inside the frontend repository.
+2. **Transformers smoke test** (`main.py`) for verifying that open-weight Hugging Face chat models can be downloaded and executed locally.
 
-Use it to quickly check whether a chosen model ID can be downloaded and executed on your local machine.
+Use whichever component you need; they are independent.
 
-## Requirements
-- Python 3.10+ (tested with 3.13 inside a virtual environment)
-- An active internet connection to download models from Hugging Face (unless already cached)
-- Sufficient RAM/VRAM to host the model you choose
+---
 
-Install Python dependencies with:
+## FastAPI Chat Backend
+
+### Features
+- `POST /chat` accepts full conversation history and returns an assistant reply built from stack-aware heuristics (matching the behaviour of the original frontend demo).
+- `GET /health` returns a simple status payload.
+- CORS support with configurable allowlist via `CHAT_BACKEND_CORS_ORIGINS`.
+- Easy local launch with `python -m backend` (uses Uvicorn under the hood).
+
+### Requirements
+- Python 3.10+
+
+Install dependencies inside a virtual environment:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r backend/requirements.txt
+```
+
+### Running the server
+
+```bash
+# inside the virtual environment
+python -m backend
+# or explicitly:
+# uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+Environment variables:
+
+- `CHAT_BACKEND_HOST` (default `0.0.0.0`)
+- `CHAT_BACKEND_PORT` (default `8000`)
+- `CHAT_BACKEND_RELOAD` (`true`/`false`, controls Uvicorn reload in `python -m backend`)
+- `CHAT_BACKEND_CORS_ORIGINS` (comma-separated list, defaults to `http://localhost:3000,http://127.0.0.1:3000`)
+
+### API quick reference
+
+- `GET /health` → `{"status": "ok"}`
+- `POST /chat`
+
+  ```jsonc
+  {
+    "messages": [
+      {"role": "assistant", "content": "..."},
+      {"role": "user", "content": "Next.js って何が良いの？"}
+    ]
+  }
+  ```
+
+  Response:
+
+  ```jsonc
+  {"role": "assistant", "content": "Next.js は SSR や SSG をシームレスに扱えるため..."}
+  ```
+
+The endpoint mirrors the API the frontend previously emulated on the client, so no schema changes are required on the consumer side. Configure your frontend with `NEXT_PUBLIC_CHAT_API_URL=http://localhost:8000` (or another host/port) and ensure the origin is listed in `CHAT_BACKEND_CORS_ORIGINS`.
+
+---
+
+## Transformers Smoke Test (`main.py`)
+
+This script remains available for quickly checking whether a Hugging Face chat model can run on your machine.
+
+### Requirements
+- Python 3.10+ (tested with 3.13)
+- Network access to Hugging Face unless the model is cached
+- Adequate RAM/VRAM for the target model
+
+Install dependencies (they include PyTorch, Transformers, etc.):
 
 ```bash
 python -m venv .venv
@@ -22,43 +85,42 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Configuration
-Edit `config/model.json` to point at any Hugging Face chat model you have access to. The repository ships with the configuration set to the TinyLlama model that has been verified to run on the above Mac M4 environment:
+### Configuration
+Update `config/model.json`:
 
 ```json
 {
-    "model_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
-    "role": "user",
-    "content": "Hello, how are you?"
+  "model_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+  "role": "user",
+  "content": "Hello, how are you?"
 }
 ```
 
-- `model_id`: Hugging Face repository ID. Pick a fully public model (for example `TinyLlama/TinyLlama-1.1B-Chat-v1.0`, `microsoft/phi-2`, `princeton-nlp/Sheared-Llama-1.3B`). Gated or private repositories require logging in with `huggingface-cli login` or setting `HF_TOKEN`. The default value (`TinyLlama/TinyLlama-1.1B-Chat-v1.0`) is the one confirmed to run in this project.
-- `role`: The role applied to the incoming message (usually `user`).
-- `content`: The text prompt to send.
+- `model_id`: Hugging Face repo ID (public/gated as appropriate)
+- `role`: Role applied to the prompt (`user` by default)
+- `content`: Prompt to send
 
-## Running
-After configuration and dependency installation:
+### Running
 
 ```bash
 source .venv/bin/activate
 python main.py
 ```
 
-Typical output on an Apple Silicon machine looks like:
+Example output:
 
 ```
 Device set to use mps
 {'role': 'assistant', 'content': "I am fine, thank you. How about you? Is everything okay? Yes, I'm doing well."}
 ```
 
-The dictionary printed is the final turn in the generated conversation (`role` and `content` keys). Adjust generation behaviour by editing the parameters passed to `pipeline` in `main.py` (for example `max_new_tokens`, `temperature`, or `return_full_text`).
+The printed dictionary is the assistant turn returned by the pipeline. Adjust generation parameters inside `main.py` (`max_new_tokens`, `temperature`, etc.) as needed.
 
-## Troubleshooting
-- **401 Unauthorized / gated model**: Choose a public model or authenticate with Hugging Face (`huggingface-cli login`).
-- **Out-of-memory errors**: Switch to a smaller model ID, reduce `max_new_tokens`, or force CPU execution by replacing `device_map="auto"` with `"cpu"`.
-- **Slow downloads**: Model artifacts are cached under `~/.cache/huggingface`. Once downloaded, reruns are fast as long as the cache remains.
+### Troubleshooting
+- **401 Unauthorized / gated model**: Use a public model or authenticate with `huggingface-cli`.
+- **Out-of-memory errors**: Choose a smaller model, reduce `max_new_tokens`, or set `device_map="cpu"`.
+- **Slow downloads**: Model artifacts cache under `~/.cache/huggingface` for reuse.
 
-## Notes
-- Apple Silicon devices with recent PyTorch will automatically use Metal (`mps`). On other hardware the pipeline falls back to CUDA or CPU.
-- The repository includes an `output/` folder with sample generations; it is not used by the script but retained for reference.
+### Notes
+- Apple Silicon devices leverage Metal (`mps`) automatically.
+- The `output/` directory contains example generations for reference only.
